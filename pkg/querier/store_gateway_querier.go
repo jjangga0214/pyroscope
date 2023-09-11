@@ -27,10 +27,11 @@ import (
 )
 
 type StoreGatewayQueryClient interface {
+	Series(ctx context.Context, req *connect.Request[ingestv1.SeriesRequest]) (*connect.Response[ingestv1.SeriesResponse], error)
+
 	MergeProfilesStacktraces(context.Context) clientpool.BidiClientMergeProfilesStacktraces
 	MergeProfilesLabels(ctx context.Context) clientpool.BidiClientMergeProfilesLabels
 	MergeProfilesPprof(ctx context.Context) clientpool.BidiClientMergeProfilesPprof
-	MergeSeries(ctx context.Context) clientpool.BidiClientSeries
 }
 
 type StoreGatewayLimits interface {
@@ -227,7 +228,7 @@ func (q *Querier) selectSeriesFromStoreGateway(ctx context.Context, req *ingeste
 	return responses, nil
 }
 
-func (q *Querier) seriesFromStoreGateway(ctx context.Context, req *ingesterv1.SeriesRequest) ([]ResponseFromReplica[clientpool.BidiClientSeries], error) {
+func (q *Querier) seriesFromStoreGateway(ctx context.Context, req *ingesterv1.SeriesRequest) ([]ResponseFromReplica[*ingestv1.SeriesResponse], error) {
 	sp, ctx := opentracing.StartSpanFromContext(ctx, "Series StoreGateway")
 	defer sp.Finish()
 
@@ -235,22 +236,20 @@ func (q *Querier) seriesFromStoreGateway(ctx context.Context, req *ingesterv1.Se
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	responses, err := forAllStoreGateways(ctx, tenantID, q.storeGatewayQuerier, func(ctx context.Context, ic StoreGatewayQueryClient) (clientpool.BidiClientSeries, error) {
-		return ic.MergeSeries(ctx), nil
+	responses, err := forAllStoreGateways(ctx, tenantID, q.storeGatewayQuerier, func(childCtx context.Context, sc StoreGatewayQueryClient) (*ingestv1.SeriesResponse, error) {
+		responses, err := sc.Series(childCtx, connect.NewRequest(&ingestv1.SeriesRequest{
+			Matchers:   req.Matchers,
+			LabelNames: req.LabelNames,
+			Start:      req.Start,
+			End:        req.End,
+		}))
+		if err != nil {
+			return nil, err
+		}
+		return responses.Msg, nil
 	})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-
-	g, _ := errgroup.WithContext(ctx)
-	for _, res := range responses {
-		res := res
-		g.Go(util.RecoverPanic(func() error {
-			return res.response.Send(req.CloneVT())
-		}))
-	}
-	if err := g.Wait(); err != nil {
-		return nil, err
 	}
 
 	return responses, nil

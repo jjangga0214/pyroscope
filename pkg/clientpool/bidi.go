@@ -22,10 +22,3 @@ type BidiClientMergeProfilesPprof interface {
 	CloseRequest() error
 	CloseResponse() error
 }
-
-type BidiClientSeries interface {
-	Send(*ingestv1.SeriesRequest) error
-	Receive() (*ingestv1.SeriesResponse, error)
-	CloseRequest() error
-	CloseResponse() error
-}
