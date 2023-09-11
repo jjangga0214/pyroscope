@@ -217,6 +217,8 @@ func (q *Querier) Series(ctx context.Context, req *connect.Request[querierv1.Ser
 		sp.LogFields(
 			otlog.String("matchers", strings.Join(req.Msg.Matchers, ",")),
 			otlog.String("label_names", strings.Join(req.Msg.LabelNames, ",")),
+			otlog.Int64("start", req.Msg.Start),
+			otlog.Int64("end", req.Msg.End),
 		)
 		sp.Finish()
 	}()
