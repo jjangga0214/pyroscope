@@ -133,7 +133,10 @@ func Test_QueryLabelNames(t *testing.T) {
 func Test_Series(t *testing.T) {
 	foobarlabels := phlaremodel.NewLabelsBuilder(nil).Set("foo", "bar")
 	foobuzzlabels := phlaremodel.NewLabelsBuilder(nil).Set("foo", "buzz")
-	req := connect.NewRequest(&querierv1.SeriesRequest{Matchers: []string{`{foo="bar"}`}})
+	req := connect.NewRequest(&querierv1.SeriesRequest{
+		Matchers: []string{`{foo="bar"}`},
+		// TODO Figure out how to get start/end to query only ingester
+	})
 	ingesterResponse := connect.NewResponse(&ingestv1.SeriesResponse{LabelsSet: []*typesv1.Labels{
 		{Labels: foobarlabels.Labels()},
 		{Labels: foobuzzlabels.Labels()},
