@@ -228,15 +228,9 @@ func (q *Querier) Series(ctx context.Context, req *connect.Request[querierv1.Ser
 	}
 
 	// Query ingesters and/or store gateway for series labels.
-	responses, err := q.series(ctx, req)
+	labelsSet, err := q.series(ctx, req)
 	if err != nil {
 		return nil, err
-	}
-
-	// Aggregate result.
-	labelsSet := make([]*typesv1.Labels, 0, len(responses))
-	for _, res := range responses {
-		labelsSet = append(labelsSet, res.response.LabelsSet...)
 	}
 
 	// Filter series.
@@ -247,15 +241,60 @@ func (q *Querier) Series(ctx context.Context, req *connect.Request[querierv1.Ser
 	}
 	filterSeriesByLabelNames(labelsSet, labelNameMap)
 
-	return connect.NewResponse(&querierv1.SeriesResponse{
-		LabelsSet: lo.UniqBy(labelsSet, func(t *typesv1.Labels) uint64 {
-			return phlaremodel.Labels(t.Labels).Hash()
-		}),
-	}), nil
+	return connect.NewResponse(&querierv1.SeriesResponse{LabelsSet: labelsSet}), nil
 }
 
-func (q *Querier) series(ctx context.Context, req *connect.Request[querierv1.SeriesRequest]) ([]ResponseFromReplica[*querierv1.SeriesResponse], error) {
-	return nil, nil
+func (q *Querier) series(ctx context.Context, req *connect.Request[querierv1.SeriesRequest]) ([]*typesv1.Labels, error) {
+	// TODO: Do we need to do this?
+	// Only query ingester if there is no store gateway.
+	if q.storeGatewayQuerier == nil {
+	}
+
+	storeQueries := splitQueryToStores(model.Time(req.Msg.Start), model.Time(req.Msg.End), model.Now(), q.cfg.QueryStoreAfter)
+	if !storeQueries.ingester.shouldQuery && !storeQueries.storeGateway.shouldQuery {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("start and end time are outside of the ingester and store gateway retention"))
+	}
+
+	var responses []ResponseFromReplica[*ingestv1.SeriesResponse]
+
+	// todo in parallel
+	if storeQueries.ingester.shouldQuery {
+		ir, err := q.seriesFromIngesters(ctx, &ingestv1.SeriesRequest{
+			Matchers:   req.Msg.Matchers,
+			LabelNames: req.Msg.LabelNames,
+			Start:      req.Msg.Start,
+			End:        req.Msg.End,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		responses = append(responses, ir...)
+	}
+
+	if storeQueries.storeGateway.shouldQuery {
+		ir, err := q.seriesFromStoreGateway(ctx, &ingestv1.SeriesRequest{
+			Matchers:   req.Msg.Matchers,
+			LabelNames: req.Msg.LabelNames,
+			Start:      req.Msg.Start,
+			End:        req.Msg.End,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		responses = append(responses, ir...)
+	}
+
+	// Filter only unique labels.
+	return lo.UniqBy(
+		lo.FlatMap(responses, func(r ResponseFromReplica[*ingestv1.SeriesResponse], _ int) []*typesv1.Labels {
+			return r.response.LabelsSet
+		}),
+		func(t *typesv1.Labels) uint64 {
+			return phlaremodel.Labels(t.Labels).Hash()
+		},
+	), nil
 }
 
 func (q *Querier) Diff(ctx context.Context, req *connect.Request[querierv1.DiffRequest]) (*connect.Response[querierv1.DiffResponse], error) {
