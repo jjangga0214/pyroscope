@@ -134,7 +134,7 @@ func Test_Series(t *testing.T) {
 	foobarlabels := phlaremodel.NewLabelsBuilder(nil).Set("foo", "bar")
 	foobuzzlabels := phlaremodel.NewLabelsBuilder(nil).Set("foo", "buzz")
 	req := connect.NewRequest(&querierv1.SeriesRequest{Matchers: []string{`{foo="bar"}`}})
-	ingesterReponse := connect.NewResponse(&ingestv1.SeriesResponse{LabelsSet: []*typesv1.Labels{
+	ingesterResponse := connect.NewResponse(&ingestv1.SeriesResponse{LabelsSet: []*typesv1.Labels{
 		{Labels: foobarlabels.Labels()},
 		{Labels: foobuzzlabels.Labels()},
 	}})
@@ -148,11 +148,11 @@ func Test_Series(t *testing.T) {
 		q := newFakeQuerier()
 		switch addr {
 		case "1":
-			q.On("Series", mock.Anything, mock.Anything).Return(ingesterReponse, nil)
+			q.On("Series", mock.Anything, mock.Anything).Return(ingesterResponse, nil)
 		case "2":
-			q.On("Series", mock.Anything, mock.Anything).Return(ingesterReponse, nil)
+			q.On("Series", mock.Anything, mock.Anything).Return(ingesterResponse, nil)
 		case "3":
-			q.On("Series", mock.Anything, mock.Anything).Return(ingesterReponse, nil)
+			q.On("Series", mock.Anything, mock.Anything).Return(ingesterResponse, nil)
 		}
 		return q, nil
 	}, nil, nil, log.NewLogfmtLogger(os.Stdout))
