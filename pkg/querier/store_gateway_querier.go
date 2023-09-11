@@ -30,6 +30,7 @@ type StoreGatewayQueryClient interface {
 	MergeProfilesStacktraces(context.Context) clientpool.BidiClientMergeProfilesStacktraces
 	MergeProfilesLabels(ctx context.Context) clientpool.BidiClientMergeProfilesLabels
 	MergeProfilesPprof(ctx context.Context) clientpool.BidiClientMergeProfilesPprof
+	MergeSeries(ctx context.Context) clientpool.BidiClientSeries
 }
 
 type StoreGatewayLimits interface {
@@ -223,5 +224,34 @@ func (q *Querier) selectSeriesFromStoreGateway(ctx context.Context, req *ingeste
 	if err := g.Wait(); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	return responses, nil
+}
+
+func (q *Querier) seriesFromStoreGateway(ctx context.Context, req *ingesterv1.SeriesRequest) ([]ResponseFromReplica[clientpool.BidiClientSeries], error) {
+	sp, ctx := opentracing.StartSpanFromContext(ctx, "Series StoreGateway")
+	defer sp.Finish()
+
+	tenantID, err := tenant.ExtractTenantIDFromContext(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	responses, err := forAllStoreGateways(ctx, tenantID, q.storeGatewayQuerier, func(ctx context.Context, ic StoreGatewayQueryClient) (clientpool.BidiClientSeries, error) {
+		return ic.MergeSeries(ctx), nil
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	g, _ := errgroup.WithContext(ctx)
+	for _, res := range responses {
+		res := res
+		g.Go(util.RecoverPanic(func() error {
+			return res.response.Send(req.CloneVT())
+		}))
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
 	return responses, nil
 }
