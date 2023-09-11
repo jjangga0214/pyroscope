@@ -24,9 +24,11 @@ type IngesterQueryClient interface {
 	LabelNames(context.Context, *connect.Request[typesv1.LabelNamesRequest]) (*connect.Response[typesv1.LabelNamesResponse], error)
 	ProfileTypes(context.Context, *connect.Request[ingestv1.ProfileTypesRequest]) (*connect.Response[ingestv1.ProfileTypesResponse], error)
 	Series(ctx context.Context, req *connect.Request[ingestv1.SeriesRequest]) (*connect.Response[ingestv1.SeriesResponse], error)
+
 	MergeProfilesStacktraces(context.Context) clientpool.BidiClientMergeProfilesStacktraces
 	MergeProfilesLabels(ctx context.Context) clientpool.BidiClientMergeProfilesLabels
 	MergeProfilesPprof(ctx context.Context) clientpool.BidiClientMergeProfilesPprof
+	MergeSeries(ctx context.Context) clientpool.BidiClientSeries
 }
 
 // IngesterQuerier helps with querying the ingesters.
@@ -126,5 +128,30 @@ func (q *Querier) selectSeriesFromIngesters(ctx context.Context, req *ingesterv1
 	if err := g.Wait(); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	return responses, nil
+}
+
+func (q *Querier) seriesFromIngesters(ctx context.Context, req *ingesterv1.SeriesRequest) ([]ResponseFromReplica[clientpool.BidiClientSeries], error) {
+	sp, ctx := opentracing.StartSpanFromContext(ctx, "Series Ingesters")
+	defer sp.Finish()
+
+	responses, err := forAllIngesters(ctx, q.ingesterQuerier, func(ctx context.Context, ic IngesterQueryClient) (clientpool.BidiClientSeries, error) {
+		return ic.MergeSeries(ctx), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	g, _ := errgroup.WithContext(ctx)
+	for _, res := range responses {
+		res := res
+		g.Go(util.RecoverPanic(func() error {
+			return res.response.Send(req.CloneVT())
+		}))
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
 	return responses, nil
 }
