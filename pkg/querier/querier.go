@@ -245,21 +245,12 @@ func (q *Querier) Series(ctx context.Context, req *connect.Request[querierv1.Ser
 }
 
 func (q *Querier) series(ctx context.Context, req *connect.Request[querierv1.SeriesRequest]) ([]*typesv1.Labels, error) {
-	// TODO: Do we need to do this?
-	// Only query ingester if there is no store gateway.
-	if q.storeGatewayQuerier == nil {
-	}
-
-	storeQueries := splitQueryToStores(model.Time(req.Msg.Start), model.Time(req.Msg.End), model.Now(), q.cfg.QueryStoreAfter)
-	if !storeQueries.ingester.shouldQuery && !storeQueries.storeGateway.shouldQuery {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("start and end time are outside of the ingester and store gateway retention"))
-	}
-
 	var responses []ResponseFromReplica[*ingestv1.SeriesResponse]
 
-	// todo in parallel
-	if storeQueries.ingester.shouldQuery {
-		ir, err := q.seriesFromIngesters(ctx, &ingestv1.SeriesRequest{
+	if q.storeGatewayQuerier == nil {
+		// Only query ingester if there is no store gateway.
+		var err error
+		responses, err = q.seriesFromIngesters(ctx, &ingestv1.SeriesRequest{
 			Matchers:   req.Msg.Matchers,
 			LabelNames: req.Msg.LabelNames,
 			Start:      req.Msg.Start,
@@ -268,22 +259,40 @@ func (q *Querier) series(ctx context.Context, req *connect.Request[querierv1.Ser
 		if err != nil {
 			return nil, err
 		}
-
-		responses = append(responses, ir...)
-	}
-
-	if storeQueries.storeGateway.shouldQuery {
-		ir, err := q.seriesFromStoreGateway(ctx, &ingestv1.SeriesRequest{
-			Matchers:   req.Msg.Matchers,
-			LabelNames: req.Msg.LabelNames,
-			Start:      req.Msg.Start,
-			End:        req.Msg.End,
-		})
-		if err != nil {
-			return nil, err
+	} else {
+		storeQueries := splitQueryToStores(model.Time(req.Msg.Start), model.Time(req.Msg.End), model.Now(), q.cfg.QueryStoreAfter)
+		if !storeQueries.ingester.shouldQuery && !storeQueries.storeGateway.shouldQuery {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("start and end time are outside of the ingester and store gateway retention"))
 		}
 
-		responses = append(responses, ir...)
+		// todo in parallel
+		if storeQueries.ingester.shouldQuery {
+			ir, err := q.seriesFromIngesters(ctx, &ingestv1.SeriesRequest{
+				Matchers:   req.Msg.Matchers,
+				LabelNames: req.Msg.LabelNames,
+				Start:      req.Msg.Start,
+				End:        req.Msg.End,
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			responses = append(responses, ir...)
+		}
+
+		if storeQueries.storeGateway.shouldQuery {
+			ir, err := q.seriesFromStoreGateway(ctx, &ingestv1.SeriesRequest{
+				Matchers:   req.Msg.Matchers,
+				LabelNames: req.Msg.LabelNames,
+				Start:      req.Msg.Start,
+				End:        req.Msg.End,
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			responses = append(responses, ir...)
+		}
 	}
 
 	// Filter only unique labels.
