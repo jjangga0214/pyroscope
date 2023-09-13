@@ -134,24 +134,16 @@ func Test_Series(t *testing.T) {
 	foobarlabels := phlaremodel.NewLabelsBuilder(nil).Set("foo", "bar")
 	foobuzzlabels := phlaremodel.NewLabelsBuilder(nil).Set("foo", "buzz")
 
-	now := time.Now()
 	req := connect.NewRequest(&querierv1.SeriesRequest{
 		Matchers: []string{`{foo="bar"}`},
-		Start:    now.Add(-1 * time.Minute).UnixMilli(),
-		End:      now.UnixMilli(),
 	})
+
 	ingesterResponse := connect.NewResponse(&ingestv1.SeriesResponse{LabelsSet: []*typesv1.Labels{
 		{Labels: foobarlabels.Labels()},
 		{Labels: foobuzzlabels.Labels()},
 	}})
-	querier, err := New(Config{
-		PoolConfig:      clientpool.PoolConfig{ClientCleanupPeriod: 1 * time.Millisecond},
-		QueryStoreAfter: 10 * time.Minute,
-	}, testhelper.NewMockRing([]ring.InstanceDesc{
-		{Addr: "1"},
-		{Addr: "2"},
-		{Addr: "3"},
-	}, 3), func(addr string) (client.PoolClient, error) {
+
+	clientPoolFactory := func(addr string) (client.PoolClient, error) {
 		q := newFakeQuerier()
 		switch addr {
 		case "1":
@@ -162,11 +154,28 @@ func Test_Series(t *testing.T) {
 			q.On("Series", mock.Anything, mock.Anything).Return(ingesterResponse, nil)
 		}
 		return q, nil
-	}, nil, nil, log.NewLogfmtLogger(os.Stdout))
+	}
 
+	querier, err := New(
+		Config{
+			PoolConfig:      clientpool.PoolConfig{ClientCleanupPeriod: 1 * time.Millisecond},
+			QueryStoreAfter: 10 * time.Minute,
+		},
+		testhelper.NewMockRing([]ring.InstanceDesc{
+			{Addr: "1"},
+			{Addr: "2"},
+			{Addr: "3"},
+		}, 3),
+		clientPoolFactory,
+		nil, // store gateway
+		nil, // prometheus registerer
+		log.NewLogfmtLogger(os.Stdout),
+	)
 	require.NoError(t, err)
+
 	out, err := querier.Series(context.Background(), req)
 	require.NoError(t, err)
+
 	require.Equal(t, []*typesv1.Labels{
 		{Labels: foobarlabels.Labels()},
 		{Labels: foobuzzlabels.Labels()},
