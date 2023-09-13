@@ -133,16 +133,20 @@ func Test_QueryLabelNames(t *testing.T) {
 func Test_Series(t *testing.T) {
 	foobarlabels := phlaremodel.NewLabelsBuilder(nil).Set("foo", "bar")
 	foobuzzlabels := phlaremodel.NewLabelsBuilder(nil).Set("foo", "buzz")
+
+	now := time.Now()
 	req := connect.NewRequest(&querierv1.SeriesRequest{
 		Matchers: []string{`{foo="bar"}`},
-		// TODO Figure out how to get start/end to query only ingester
+		Start:    now.Add(-1 * time.Minute).UnixMilli(),
+		End:      now.UnixMilli(),
 	})
 	ingesterResponse := connect.NewResponse(&ingestv1.SeriesResponse{LabelsSet: []*typesv1.Labels{
 		{Labels: foobarlabels.Labels()},
 		{Labels: foobuzzlabels.Labels()},
 	}})
 	querier, err := New(Config{
-		PoolConfig: clientpool.PoolConfig{ClientCleanupPeriod: 1 * time.Millisecond},
+		PoolConfig:      clientpool.PoolConfig{ClientCleanupPeriod: 1 * time.Millisecond},
+		QueryStoreAfter: 10 * time.Minute,
 	}, testhelper.NewMockRing([]ring.InstanceDesc{
 		{Addr: "1"},
 		{Addr: "2"},
